@@ -63,6 +63,8 @@ func loadall() {
 }
 
 func main() {
+	http.DefaultClient.Timeout = time.Second * 15
+
 	godotenv.Load()
 
 	go loadall()
