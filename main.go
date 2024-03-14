@@ -32,6 +32,11 @@ func loadall() {
 	for {
 		result := ListingsResponse{}
 		func() {
+			defer func() {
+				if err := recover(); err != nil {
+					log.Println("recovering", err)
+				}
+			}()
 			req, _ := http.NewRequest("GET", apiURL, nil)
 			q := req.URL.Query()
 			q.Add("page", strconv.Itoa(p))
@@ -40,6 +45,7 @@ func loadall() {
 			resp, err := http.DefaultClient.Do(req)
 			if err != nil {
 				log.Println("error getting listings", err)
+				p = 1
 				return
 			}
 			defer resp.Body.Close()
@@ -56,7 +62,7 @@ func loadall() {
 		p = result.Page + 1
 		if p > result.TotalPages {
 			p = 1
-			time.Sleep(time.Second * 30)
+			time.Sleep(time.Second * 60)
 			return
 		}
 	}
