@@ -27,11 +27,13 @@ var listings = ListingCache{
 }
 
 func loadall() {
+	defer log.Println("i exited")
 	p := 1
 	apiURL := os.Getenv("MLB_LISTINGS_URL")
 	for {
 		result := ListingsResponse{}
 		func() {
+			log.Println("starting a load")
 			defer func() {
 				if err := recover(); err != nil {
 					log.Println("recovering", err)
@@ -41,6 +43,8 @@ func loadall() {
 			q := req.URL.Query()
 			q.Add("page", strconv.Itoa(p))
 			req.URL.RawQuery = q.Encode()
+
+			log.Println("url", req.URL.String())
 
 			resp, err := http.DefaultClient.Do(req)
 			if err != nil {
@@ -63,7 +67,6 @@ func loadall() {
 		if p > result.TotalPages {
 			p = 1
 			time.Sleep(time.Second * 60)
-			return
 		}
 	}
 }
@@ -122,7 +125,6 @@ func filterListings(needle string, haystack []Listing) []Listing {
 	results := []Listing{}
 	for _, item := range haystack {
 		lcneedle, lcname := strings.ToLower(needle), strings.ToLower(item.ListingName)
-		log.Println("needle, listing", lcneedle, lcname)
 		if strings.Contains(lcname, lcneedle) {
 			results = append(results, item)
 		}
