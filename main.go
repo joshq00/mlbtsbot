@@ -12,6 +12,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/blevesearch/bleve"
 	"github.com/gempir/go-twitch-irc/v4"
 	"github.com/joho/godotenv"
 )
@@ -26,6 +27,11 @@ var listings = ListingCache{
 	map[string]Listing{},
 }
 
+const (
+	loadListingsInterval = time.Minute
+	loadItemsInterval    = time.Minute * 10
+)
+
 func loadall() {
 	defer log.Println("i exited")
 	p := 1
@@ -33,7 +39,7 @@ func loadall() {
 	for {
 		result := ListingsResponse{}
 		func() {
-			log.Println("starting a load")
+			// log.Println("starting a load")
 			defer func() {
 				if err := recover(); err != nil {
 					log.Println("recovering", err)
@@ -43,8 +49,6 @@ func loadall() {
 			q := req.URL.Query()
 			q.Add("page", strconv.Itoa(p))
 			req.URL.RawQuery = q.Encode()
-
-			log.Println("url", req.URL.String())
 
 			resp, err := http.DefaultClient.Do(req)
 			if err != nil {
@@ -66,17 +70,98 @@ func loadall() {
 		p = result.Page + 1
 		if p > result.TotalPages {
 			p = 1
-			time.Sleep(time.Second * 60)
+			time.Sleep(loadListingsInterval)
 		}
 	}
 }
 
 func main() {
-	http.DefaultClient.Timeout = time.Second * 15
-
 	godotenv.Load()
 
-	go loadall()
+	http.DefaultClient.Timeout = time.Second * 15
+	log.SetFlags(log.Lshortfile | log.Ltime)
+
+	bleveit()
+	// notmain()
+}
+
+func notmain() {
+
+	// go loadall()
+	go loadMLBCards()
+
+	/*
+		go func() {
+			_ = os.RemoveAll("items.bleve")
+			mapping := bleve.NewIndexMapping()
+			index, err := bleve.New("items.bleve", mapping)
+
+			if err != nil {
+				panic(err)
+			}
+
+			for {
+				time.Sleep(time.Second * 5)
+
+				func() {
+					return
+					items.mutex.Lock()
+					defer items.mutex.Unlock()
+					for k, v := range items.items {
+						// log.Println(k, ":", v.Name, v.Ovr, v.SeriesYear, v.Series)
+						// log.Println(k, ":", v.Name, v.Ovr, v.SeriesYear, v.Series)
+						_ = fmt.Sprint(k, v)
+					}
+				}()
+
+				func() {
+					items.mutex.Lock()
+					defer items.mutex.Unlock()
+
+					log.Println(len(items.items), "items")
+					for k, v := range items.items {
+						if strings.HasPrefix(v.UUID, "27992e4bc24123be43724a326667f0dd") {
+							log.Println("!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!")
+							log.Println("there's acuna", v)
+							log.Println("!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!")
+						}
+						err = index.Index(k, v)
+						if err != nil {
+							log.Println(err)
+						}
+					}
+				}()
+			}
+		}()
+		//*/
+
+	go func() {
+		for {
+			func() {
+				defer func() {
+					if err := recover(); err != nil {
+						log.Println("recovering", err)
+					}
+				}()
+
+				idx, _ := bleve.Open("items.bleve")
+				defer idx.Close()
+				query := bleve.NewQueryStringQuery("olson")
+				req := bleve.NewSearchRequest(query)
+				searchResult, _ := idx.Search(req)
+				log.Println("-------------------------------------")
+				// doc, _ := idx.Document("1d7f7d5faea7d8528d45aeaf191868c1")
+				// log.Printf("%#v\n", doc)
+				log.Printf("results %#v\n", searchResult)
+				log.Printf("status %#v\n", searchResult.Status.Errors)
+				log.Println("-------------------------------------")
+				for _, v := range searchResult.Hits {
+					log.Println(v.Index, v.ID, v.Score, v.String())
+				}
+			}()
+			time.Sleep(time.Second * 10)
+		}
+	}()
 
 	c := twitch.NewClient("joshq00", os.Getenv("TWITCH_OAUTH_TOKEN"))
 	c.Join(strings.Split(os.Getenv("TWITCH_CHANNELS"), ",")...)
