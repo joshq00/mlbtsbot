@@ -73,7 +73,6 @@ func (l Listing) ToSearchable() (string, any) {
 }
 
 func loadListingsasync() {
-	_ = listings.loadFromFile()
 	defer log.Println("i exited")
 	// p := 1
 	apiURL := os.Getenv("MLB_LISTINGS_URL")
@@ -118,7 +117,7 @@ func loadListingsasync() {
 				wg.Add(1)
 				go func() {
 					defer wg.Done()
-					loadPage(i)
+					_, _ = loadPage(i)
 				}()
 			}
 		}()
@@ -128,45 +127,5 @@ func loadListingsasync() {
 		log.Println("done waiting")
 		listings.Save()
 		time.Sleep(loadListingsInterval)
-	}
-}
-
-func loadListings() {
-	defer log.Println("i exited")
-	p := 1
-	apiURL := os.Getenv("MLB_LISTINGS_URL")
-	for {
-		result := ListingsResponse{}
-		func() {
-			// log.Println("starting a load")
-			defer func() {
-				if err := recover(); err != nil {
-					log.Println("recovering", err)
-				}
-			}()
-			req, _ := http.NewRequest("GET", apiURL, nil)
-			q := req.URL.Query()
-			q.Add("page", strconv.Itoa(p))
-			req.URL.RawQuery = q.Encode()
-
-			resp, err := http.DefaultClient.Do(req)
-			if err != nil {
-				log.Println("error getting listings", err)
-				p = 1
-				return
-			}
-			defer resp.Body.Close()
-
-			_ = json.NewDecoder(resp.Body).Decode(&result)
-			log.Println("listings page", result.Page, "/", result.TotalPages)
-			for _, l := range result.Listings {
-				listings.Set(l.Item.UUID, l)
-			}
-		}()
-		p = result.Page + 1
-		if p > result.TotalPages {
-			p = 1
-			time.Sleep(loadListingsInterval)
-		}
 	}
 }

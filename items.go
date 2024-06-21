@@ -1,7 +1,6 @@
 package main
 
 import (
-	"bytes"
 	"encoding/json"
 	"fmt"
 	"log"
@@ -120,60 +119,6 @@ type ItemsResponse struct {
 	PerPage    int       `json:"per_page"`
 	TotalPages int       `json:"total_pages"`
 	Items      []MLBCard `json:"items"`
-}
-
-func loadMLBCards() {
-	_ = items.loadFromFile()
-
-	defer log.Println("i exited")
-	apiURL := os.Getenv("MLB_ITEMS_URL")
-	page := 1
-
-	for {
-		result := ItemsResponse{}
-		func() {
-			log.Println("starting a load")
-			defer func() {
-				if err := recover(); err != nil {
-					log.Println("recovering", err)
-				}
-			}()
-			req, _ := http.NewRequest("GET", apiURL, nil)
-			q := req.URL.Query()
-			q.Add("page", strconv.Itoa(page))
-			req.URL.RawQuery = q.Encode()
-
-			resp, err := http.DefaultClient.Do(req)
-			if err != nil {
-				log.Println("error getting items", err)
-				page = 1
-				return
-			}
-			defer resp.Body.Close()
-			log.Println("got items page", page)
-
-			_ = json.NewDecoder(resp.Body).Decode(&result)
-
-			page = result.Page + 1
-
-			for _, l := range result.Items {
-				items.Set(l.UUID, l)
-			}
-		}()
-
-		if page > result.TotalPages {
-			page = 1
-			var buf bytes.Buffer
-			enc := json.NewEncoder(&buf)
-			enc.SetIndent("", "  ")
-
-			_ = enc.Encode(items.All())
-
-			log.Println("writing items.json")
-			_ = os.WriteFile("items.json", buf.Bytes(), os.ModePerm)
-			time.Sleep(loadItemsInterval)
-		}
-	}
 }
 
 func loadMLBCardsAsync() {

@@ -62,7 +62,6 @@ func (v Captain) ToSearchable() (string, any) {
 }
 
 func loadCaptainsAsync() {
-	captains.loadFromFile()
 	defer log.Println("i exited")
 	apiURL := os.Getenv("MLB_CAPTAINS_URL")
 	loadPage := func(page int) (CaptainsResponse, error) {
@@ -105,7 +104,7 @@ func loadCaptainsAsync() {
 				wg.Add(1)
 				go func() {
 					defer wg.Done()
-					loadPage(i)
+					_, _ = loadPage(i)
 				}()
 			}
 		}()
@@ -118,6 +117,7 @@ func loadCaptainsAsync() {
 	}
 }
 
+// findcaptains finds captains that match a card
 func findcaptains(plyr MLBCard) []Captain {
 	capts := []Captain{}
 	for _, capt := range captains.All() {
@@ -137,6 +137,8 @@ func removes(orig string, drops ...string) string {
 	return strings.TrimSpace(orig)
 }
 
+// Matches determines if the card p is elegibile
+// for this captain
 func (c Captain) Matches(p MLBCard) bool {
 	switch true {
 	// Players from the X team
@@ -198,5 +200,4 @@ func (c Captain) Matches(p MLBCard) bool {
 		return false
 	}
 
-	return false
 }
