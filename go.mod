@@ -44,6 +44,7 @@ require (
 	github.com/couchbase/moss v0.2.0 // indirect
 	github.com/couchbase/vellum v1.0.2 // indirect
 	github.com/elazarl/go-bindata-assetfs v1.0.1 // indirect
+	github.com/gempir/go-twitch-irc/v2 v2.8.1 // indirect
 	github.com/glycerine/go-unsnap-stream v0.0.0-20181221182339-f9677308dec2 // indirect
 	github.com/golang/geo v0.0.0-20210211234256-740aa86cb551 // indirect
 	github.com/golang/protobuf v1.3.5 // indirect

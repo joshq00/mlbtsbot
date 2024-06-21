@@ -28,7 +28,7 @@ func clean(s string) string {
 
 // go:embed items.json
 // var itemsjson []byte
-func search(q string) {
+func search(q string) ([]MLBCard, error) {
 	q = clean(q)
 
 	mapping := bleve.NewIndexMapping()
@@ -39,8 +39,8 @@ func search(q string) {
 	{
 		b := index.NewBatch()
 		func() {
-			items.mutex.Lock()
-			defer items.mutex.Unlock()
+			// items.mutex.Lock()
+			// defer items.mutex.Unlock()
 
 			log.Println(len(items.items), "items")
 			for _, v := range items.items {
@@ -66,39 +66,47 @@ func search(q string) {
 	}
 
 	log.Println("query", clean(q))
-	func() {
-		query := bleve.NewQueryStringQuery(q)
-		req := bleve.NewSearchRequest(query)
-		req.SortBy([]string{"-_score", "-ovr"})
+	results := []MLBCard{}
 
-		searchResult, err := index.Search(req)
-		if err != nil {
-			slog.Error("search result error", "err", err)
-			return
+	query := bleve.NewQueryStringQuery(q)
+	req := bleve.NewSearchRequest(query)
+	req.SortBy([]string{"-_score", "-ovr"})
+
+	searchResult, err := index.Search(req)
+	if err != nil {
+		slog.Error("search result error", "err", err)
+
+		return nil, err
+	}
+	log.Println("-------------------------------------")
+	// doc, _ := index.Document("1d7f7d5faea7d8528d45aeaf191868c1")
+	// log.Printf("%#v\n", doc)
+	log.Printf("results: %#v\n", searchResult.Hits.Len())
+	log.Println("-------------------------------------")
+
+	minScore := 1.5
+	for _, v := range searchResult.Hits {
+		pre := ""
+		if v.Score < minScore {
+			pre = "\t\t"
 		}
-		log.Println("-------------------------------------")
-		// doc, _ := index.Document("1d7f7d5faea7d8528d45aeaf191868c1")
-		// log.Printf("%#v\n", doc)
-		log.Printf("results %#v\n", searchResult)
-		log.Println("-------------------------------------")
-		for _, v := range searchResult.Hits {
-			pre := ""
-			if v.Score < 0.5 {
-				pre = "\t\t"
-			}
-			log.Println(
-				pre,
-				// v.Index, "items.bleve"
-				// v.ID, // mlb uuid
-				v.Score,
-				items.items[v.ID].Name,
-				items.items[v.ID].Ovr,
-				items.items[v.ID].Team,
-				items.items[v.ID].SeriesYear,
-				items.items[v.ID].Series,
-			)
+		if v.Score >= minScore {
+			results = append(results, items.items[v.ID])
 		}
-	}()
+		log.Println(
+			pre,
+			// v.Index, "items.bleve"
+			// v.ID, // mlb uuid
+			v.Score,
+			items.items[v.ID].Name,
+			items.items[v.ID].Ovr,
+			items.items[v.ID].Team,
+			items.items[v.ID].SeriesYear,
+			items.items[v.ID].Series,
+		)
+	}
+
+	return results, nil
 }
 
 func bleveit() {

@@ -1,88 +1,179 @@
 package main
 
 import (
+	"bufio"
 	_ "embed"
-	"encoding/json"
 	"fmt"
 	"log"
-	"net/http"
+	"log/slog"
 	"os"
-	"strconv"
+	"os/signal"
 	"strings"
-	"sync"
+	"syscall"
 	"time"
 
 	"github.com/blevesearch/bleve"
 	"github.com/gempir/go-twitch-irc/v4"
-	"github.com/joho/godotenv"
 )
-
-type ListingCache struct {
-	mutex    *sync.Mutex
-	listings map[string]Listing
-}
-
-var listings = ListingCache{
-	&sync.Mutex{},
-	map[string]Listing{},
-}
 
 const (
-	loadListingsInterval = time.Minute
-	loadItemsInterval    = time.Minute * 10
+	loadListingsInterval = time.Minute * 10
+	loadItemsInterval    = time.Minute * 30
 )
 
-func loadall() {
-	defer log.Println("i exited")
-	p := 1
-	apiURL := os.Getenv("MLB_LISTINGS_URL")
-	for {
-		result := ListingsResponse{}
-		func() {
-			// log.Println("starting a load")
-			defer func() {
-				if err := recover(); err != nil {
-					log.Println("recovering", err)
-				}
-			}()
-			req, _ := http.NewRequest("GET", apiURL, nil)
-			q := req.URL.Query()
-			q.Add("page", strconv.Itoa(p))
-			req.URL.RawQuery = q.Encode()
-
-			resp, err := http.DefaultClient.Do(req)
-			if err != nil {
-				log.Println("error getting listings", err)
-				p = 1
-				return
-			}
-			defer resp.Body.Close()
-			log.Println("got page", p)
-
-			_ = json.NewDecoder(resp.Body).Decode(&result)
-			log.Println("result", result.Page, result.TotalPages)
-			listings.mutex.Lock()
-			defer listings.mutex.Unlock()
-			for _, l := range result.Listings {
-				listings.listings[l.Item.UUID] = l
-			}
-		}()
-		p = result.Page + 1
-		if p > result.TotalPages {
-			p = 1
-			time.Sleep(loadListingsInterval)
+func findListing(q string) {
+	matches, _ := items.Search(q)
+	ll := []Listing{}
+	for _, v := range matches {
+		if l, ok := listings.Get(v.UUID); ok {
+			ll = append(ll, l)
+			log.Println(l.BestSellPrice, l.BestBuyPrice)
 		}
 	}
 }
 
+func lineReader() {
+	// results, err := items.Search("jose ramirez live guardians")
+	//
+	// log.Println(err)
+	// for _, item := range results {
+	// 	log.Println(
+	// 		item.Name,
+	// 		item.Ovr,
+	// 		item.Team,
+	// 		item.SeriesYear,
+	// 		item.Series,
+	// 	)
+	// }
+	// return
+
+	scanner := bufio.NewScanner(os.Stdin)
+	fmt.Println("Enter text (press Ctrl+D or Ctrl+Z to exit):")
+	for scanner.Scan() {
+		line := scanner.Text()
+		fmt.Println("You entered:", line)
+		{
+			results, err := items.Search(line)
+			log.Println(err)
+			for _, item := range results {
+				log.Println(
+					item.Name,
+					item.Ovr,
+					item.Team,
+					item.SeriesYear,
+					item.Series,
+				)
+			}
+		}
+		{
+			results, err := listings.Search(line)
+			log.Println(err)
+			for _, item := range results {
+				log.Println(
+					item.BestBuyPrice,
+					item.BestSellPrice,
+					item.Item.Name,
+					item.Item.Ovr,
+					item.Item.Team,
+					item.Item.SeriesYear,
+					item.Item.Series,
+				)
+			}
+		}
+	}
+
+	if err := scanner.Err(); err != nil {
+		fmt.Fprintln(os.Stderr, "reading standard input:", err)
+	}
+}
+
 func main() {
-	godotenv.Load()
+	captains.loadFromFile()
+	listings.loadFromFile()
+	items.loadFromFile()
 
-	http.DefaultClient.Timeout = time.Second * 15
-	log.SetFlags(log.Lshortfile | log.Ltime)
+	// findcaptains()
+	// return
+	// go loadCaptainsAsync()
+	// go loadMLBCardsAsync()
+	// go loadListingsasync()
+	// // loadMLBCardsFromFile()
+	// select {}
+	// lineReader()
+	// return
 
-	bleveit()
+	// go loadMLBCards()
+	// go loadMLBCardsAsync()
+	// go loadListingsasync()
+
+	// bleveit()
 	// notmain()
+
+	log.Println(os.Getenv("TWITCH_CHANNELS"))
+
+	channels := strings.Split(os.Getenv("TWITCH_CHANNELS"), ",")
+
+	clientID := os.Getenv("CLIENT_ID")
+	log.Println("Get an access token\n",
+		"https://id.twitch.tv/oauth2/authorize?client_id="+
+			clientID+
+			"&redirect_uri=http://localhost&response_type=token&scope=chat:read%20chat:edit")
+
+	client := twitch.NewClient("joshq00", os.Getenv("TWITCH_OAUTH_TOKEN"))
+
+	client.OnPrivateMessage(func(msg twitch.PrivateMessage) {
+		fmt.Println(msg.Message)
+	})
+	client.OnConnect(func() {
+		slog.Info("connected")
+	})
+	// client.SetRateLimiter(twitch.CreateVerifiedRateLimiter())
+	client.OnPrivateMessage(func(msg twitch.PrivateMessage) {
+		// log.Println(msg.Channel, msg.Message, msg.User.Name)
+		// log.Printf("#%15s @%15s : %s\n", msg.Channel, msg.User.Name, msg.Message)
+		slog.Debug("pm", "channel", msg.Channel, "user", msg.User.Name, "msg", msg.Message)
+		// log.Printf("%#v\n", msg)
+	})
+
+	client.OnPrivateMessage(pmhandler(client))
+
+	client.OnWhisperMessage(func(msg twitch.WhisperMessage) {})
+	client.OnClearChatMessage(func(msg twitch.ClearChatMessage) {})
+	client.OnClearMessage(func(msg twitch.ClearMessage) {
+		log.Printf("[DELETED] #%s @%s : %s\n", msg.Channel, msg.Login, msg.Message)
+	})
+	client.OnRoomStateMessage(func(msg twitch.RoomStateMessage) {})
+	client.OnUserNoticeMessage(func(msg twitch.UserNoticeMessage) {})
+	client.OnUserStateMessage(func(msg twitch.UserStateMessage) {
+		// log.Printf("%#v\n", msg)
+	})
+	client.OnGlobalUserStateMessage(func(msg twitch.GlobalUserStateMessage) {
+		gusm = msg
+	})
+	client.OnNoticeMessage(func(msg twitch.NoticeMessage) {})
+	client.OnUserJoinMessage(func(msg twitch.UserJoinMessage) {
+		// fmt.Printf("@%s %sED %s\n", msg.User, "JOIN", msg.Channel)
+	})
+	client.OnUserPartMessage(func(msg twitch.UserPartMessage) {
+		// fmt.Printf("@%s %sED %s\n", msg.User, "PART", msg.Channel)
+	})
+
+	client.Join(channels...)
+
+	go func() {
+		err := client.Connect()
+		if err != nil {
+			panic(err)
+		}
+	}()
+	c := make(chan os.Signal)
+	signal.Notify(c, os.Interrupt, syscall.SIGTERM)
+	<-c
+	for _, v := range channels {
+		client.Depart(v)
+	}
+	log.Println(client.Disconnect())
+	time.Sleep(time.Second)
 }
 
 func notmain() {
@@ -195,10 +286,8 @@ func findCard(playerName string) []Listing {
 	// parse the json into a ListingsResponse{}
 	// filter the listings down to playerName
 	// return the matching cards
-	listings.mutex.Lock()
-	defer listings.mutex.Unlock()
 	ll := []Listing{}
-	for _, v := range listings.listings {
+	for _, v := range listings.All() {
 		ll = append(ll, v)
 	}
 

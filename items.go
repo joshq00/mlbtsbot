@@ -3,6 +3,7 @@ package main
 import (
 	"bytes"
 	"encoding/json"
+	"fmt"
 	"log"
 	"net/http"
 	"os"
@@ -13,24 +14,8 @@ import (
 	_ "github.com/blevesearch/bleve"
 )
 
-const APIPathItems = `https://mlb24.theshow.com/apis/items.json?type=mlb_card`
-
-type ItemsResponse struct {
-	Page       int       `json:"page"`
-	PerPage    int       `json:"per_page"`
-	TotalPages int       `json:"total_pages"`
-	Items      []MLBCard `json:"items"`
-}
-
-type ItemsCache struct {
-	mutex *sync.Mutex
-	items map[string]MLBCard
-}
-
-var items = ItemsCache{
-	&sync.Mutex{},
-	map[string]MLBCard{},
-}
+// const APIPathItems = `https://mlb24.theshow.com/apis/items.json?type=mlb_card`
+var items = Cache[MLBCard]{}
 
 type MLBCard struct {
 	UUID                      string    `json:"uuid"`
@@ -114,11 +99,36 @@ type Quirks struct {
 	Img         string `json:"img"`
 }
 
+func (v MLBCard) ToSearchable() (string, any) {
+	descr := fmt.Sprintf("%s (%v) | %v %s %v", clean(v.Name), v.Ovr, v.SeriesYear, v.TeamShortName, v.Series)
+
+	return v.UUID, struct {
+		Description string `json:"description"`
+		Name        string `json:"name"`
+		Ovr         int    `json:"ovr"`
+		Team        string `json:"team"`
+	}{
+		descr,
+		clean(v.Name),
+		v.Ovr,
+		v.Team,
+	}
+}
+
+type ItemsResponse struct {
+	Page       int       `json:"page"`
+	PerPage    int       `json:"per_page"`
+	TotalPages int       `json:"total_pages"`
+	Items      []MLBCard `json:"items"`
+}
+
 func loadMLBCards() {
+	_ = items.loadFromFile()
+
 	defer log.Println("i exited")
-	// apiURL := os.Getenv("MLB_LISTINGS_URL")
-	apiURL := APIPathItems
+	apiURL := os.Getenv("MLB_ITEMS_URL")
 	page := 1
+
 	for {
 		result := ItemsResponse{}
 		func() {
@@ -146,10 +156,8 @@ func loadMLBCards() {
 
 			page = result.Page + 1
 
-			listings.mutex.Lock()
-			defer listings.mutex.Unlock()
 			for _, l := range result.Items {
-				items.items[l.UUID] = l
+				items.Set(l.UUID, l)
 			}
 		}()
 
@@ -158,11 +166,68 @@ func loadMLBCards() {
 			var buf bytes.Buffer
 			enc := json.NewEncoder(&buf)
 			enc.SetIndent("", "  ")
-			_ = enc.Encode(items.items)
+
+			_ = enc.Encode(items.All())
 
 			log.Println("writing items.json")
 			_ = os.WriteFile("items.json", buf.Bytes(), os.ModePerm)
 			time.Sleep(loadItemsInterval)
 		}
+	}
+}
+
+func loadMLBCardsAsync() {
+	defer log.Println("i exited")
+	apiURL := os.Getenv("MLB_ITEMS_URL")
+	loadPage := func(page int) (ItemsResponse, error) {
+		defer func() {
+			if err := recover(); err != nil {
+				log.Println("recovering", err)
+			}
+		}()
+		result := ItemsResponse{}
+		// log.Println("starting a load")
+		req, _ := http.NewRequest("GET", apiURL, nil)
+		q := req.URL.Query()
+		q.Add("page", strconv.Itoa(page))
+		req.URL.RawQuery = q.Encode()
+
+		resp, err := http.DefaultClient.Do(req)
+		if err != nil {
+			log.Println("error getting items", err)
+			return result, err
+		}
+		defer resp.Body.Close()
+
+		_ = json.NewDecoder(resp.Body).Decode(&result)
+		log.Println("items page", result.Page, "/", result.TotalPages)
+		for _, l := range result.Items {
+			items.Set(l.UUID, l)
+		}
+		return result, err
+	}
+
+	wg := sync.WaitGroup{}
+	for {
+		func() {
+			p1, err := loadPage(1)
+			if err != nil {
+				log.Println(err)
+				return
+			}
+			for i := p1.Page + 1; i <= p1.TotalPages; i++ {
+				wg.Add(1)
+				go func() {
+					defer wg.Done()
+					loadPage(i)
+				}()
+			}
+		}()
+
+		log.Println("waiting")
+		wg.Wait()
+		log.Println("done waiting")
+		items.Save()
+		time.Sleep(loadItemsInterval)
 	}
 }
